@@ -1,0 +1,7 @@
+all:
+  hosts:
+    proxmox:
+      ansible_host: 10.0.0.1 # your Proxmox host/IP
+      ansible_user: root # or another SSH user with pct/pvesh rights
+      ansible_ssh_private_key_file: ~/.ssh/id_ed25519
+      proxmox_node: pve # your Proxmox node name (pvesh 'nodes/<name>')

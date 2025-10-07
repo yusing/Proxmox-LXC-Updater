@@ -1,0 +1,78 @@
+---
+- name: Update all running LXC containers via pct exec
+  hosts: proxmox
+  gather_facts: false
+  vars:
+    # Max time to wait for all updates to finish (seconds)
+    max_wait_seconds: 7200
+    # Log file inside each container
+    update_log: /var/log/lxc-update.log
+
+  tasks:
+    - name: Get running LXC containers via pvesh
+      command: >
+        pvesh get /nodes/{{ proxmox_node }}/lxc --output-format json
+      register: lxc_list
+      changed_when: false
+
+    - name: Build list of running containers (vmid, name)
+      set_fact:
+        running_lxcs: >-
+          {{ (lxc_list.stdout | from_json)
+             | json_query("[?status=='running'].{vmid: vmid, name: name}") }}
+
+    - name: Show containers to be updated
+      debug:
+        var: running_lxcs
+
+    - name: Kick off updates in parallel (one job per LXC)
+      shell: |
+        set -euo pipefail
+        echo "--- Starting update for LXC {{ lxc.vmid }} ({{ lxc.name | default('') }}) ---"
+        pct exec {{ lxc.vmid }} -- bash -lc '
+          set -e
+          trap "mv -f /usr/bin/whiptail.old /usr/bin/whiptail 2>/dev/null || true" EXIT
+          if [ -x /usr/bin/whiptail ]; then
+            cp -f /usr/bin/whiptail /usr/bin/whiptail.old
+            printf "#!/bin/sh\necho 2\n" > /usr/bin/whiptail
+            chmod +x /usr/bin/whiptail
+          fi
+          echo "--- Performing update ---"
+          update > {{ update_log }} 2>&1 || true
+          echo "--- Update done ---"
+        '
+      args:
+        executable: /bin/bash
+      async: 86400
+      poll: 0
+      loop: "{{ running_lxcs }}"
+      loop_control:
+        loop_var: lxc
+        label: "{{ lxc.vmid }} {{ lxc.name | default('') }}"
+      register: update_jobs
+
+    - name: Wait for all LXC updates to finish
+      async_status:
+        jid: "{{ item.ansible_job_id }}"
+      register: job_status
+      until: job_status.finished
+      retries: "{{ (max_wait_seconds / 5) | int }}"
+      delay: 5
+      loop: "{{ update_jobs.results }}"
+      loop_control:
+        label: "{{ item.lxc.vmid }} {{ item.lxc.name | default('') }}"
+
+    - name: Flatten wait results
+      set_fact:
+        finished_jobs: >-
+          {{ job_status.results
+             | json_query("[].{finished: finished, lxc: item.lxc, rc: rc, stdout: stdout, stderr: stderr}") }}
+
+    - name: Summarize results
+      debug:
+        msg: >-
+          LXC {{ item.lxc.vmid }} ({{ item.lxc.name | default('') }}):
+          {{ 'OK' if item.finished else 'FAILED' }}
+      loop: "{{ finished_jobs }}"
+      loop_control:
+        label: "{{ item.lxc.vmid }} {{ item.lxc.name | default('') }}"
