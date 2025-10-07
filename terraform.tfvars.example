@@ -1,0 +1,14 @@
+# terraform.tfvars
+
+# Proxmox API connection details
+proxmox_api_url          = "https://10.0.0.1:8006/api2/json"
+proxmox_api_token_id     = "terraform@pve!provider"
+proxmox_api_token_secret = ""
+
+# Target Proxmox node
+proxmox_node_name = "pve"
+
+# Proxmox HOST SSH connection details
+proxmox_ssh_host             = "10.0.0.1"
+proxmox_ssh_user             = "root"
+proxmox_ssh_private_key_path = "/Users/yusing/.ssh/id_ecdsa"
